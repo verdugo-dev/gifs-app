@@ -25,8 +25,10 @@ const imageUrls: string[] = [
 })
 export default class TrendingPageComponent {
 
-  gifs = signal(imageUrls);
+  // gifs = signal(imageUrls);
 
   gifService = inject( GifService );
+
+
 
 }
