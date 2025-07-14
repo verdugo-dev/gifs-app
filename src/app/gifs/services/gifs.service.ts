@@ -5,14 +5,14 @@ import { environment } from '@environments/environment';
 import type { GiphyResponse } from '../interfaces/giphy.interfaces';
 import type { Gif } from '../interfaces/gif.interface';
 import { GifMapper } from '../mapper/gif.mapper';
-import { map, tap } from 'rxjs';
+import { finalize, map, tap } from 'rxjs';
 
 const GIF_KEY = 'gifs';
 
 const loadFromLocalStorage = () => {
   const gifsFromLocalStorage = localStorage.getItem(GIF_KEY) ?? '{}';
   const gifs = JSON.parse( gifsFromLocalStorage );
-  console.log(gifs)
+  
   return gifs;
 }
 
@@ -22,7 +22,18 @@ export class GifService {
   private http = inject(HttpClient);
 
   trendingGifs = signal<Gif[]>([]);
-  trendingGifsLoading = signal(true);
+  trendingGifsLoading = signal(false);
+  private trendingPage = signal(0);
+
+  trendingGifGroup = computed<Gif[][]>(() => {
+    const groups = [];
+    
+    for ( let i = 0; i < this.trendingGifs().length; i += 3) {
+        groups.push( this.trendingGifs().slice(i, i + 3) );
+    }
+
+    return groups;
+  });
 
   searchHistory = signal<Record<string, Gif[]>>( loadFromLocalStorage() );
   searchHistoryKeys = computed(() => Object.keys(this.searchHistory()) );
@@ -39,17 +50,32 @@ export class GifService {
 
 
   loadTrendingGifs() {
-    this.http.get<GiphyResponse>(`${ environment.giphyURL }/gifs/trending`, {
-      params: {
-        api_key: environment.giphyApiKey,
-        limit: 20
-      }
-    }).subscribe((resp) => {
-      const gifs = GifMapper.mapGiphyItemsToGifArray(resp.data);
-      this.trendingGifs.set(gifs);
-      this.trendingGifsLoading.set(false);
-      console.log({gifs})
-    })
+    if ( this.trendingGifsLoading() ) return;
+
+    this.trendingGifsLoading.set( true );
+
+    const endpoint = `${ environment.giphyURL }/gifs/trending`;
+    const offset = this.trendingPage() * 20;
+    const params = {
+      api_key: environment.giphyApiKey,
+      limit: 20,
+      offset,
+    }
+
+    this.http.get<GiphyResponse>(endpoint, { params })
+      .pipe(
+        map(resp => GifMapper.mapGiphyItemsToGifArray(resp.data)),
+        finalize(() => this.trendingGifsLoading.set(false))
+      )
+      .subscribe({
+        next: (gifs) => {
+          this.trendingGifs.update(current => [...current, ...gifs]);
+          this.trendingPage.update(page => page + 1);
+        },
+        error: (err) => {
+          console.error('Failed to load trending GIFs', err)
+        }
+      })
 
   }
 
